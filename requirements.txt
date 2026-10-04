@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-dotenv
+pymupdf
+sentence-transformers
+chromadb
+rank-bm25
+pytest
+U google-genai
+pip install streamlit
+pip install openai
+pip install httpx
+python -m pip install beautifulsoup4
