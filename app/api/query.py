@@ -1,5 +1,6 @@
 import logging
-import json`r`nfrom fastapi import APIRouter, Depends, HTTPException
+import json
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.security.dependencies import get_current_user
