@@ -81,6 +81,7 @@ async def rate_limit_middleware(request: Request, call_next):
 
 # cd C:\Projects\enterprise-rag
 # .\.venv\Scripts\Activate.ps1
+# python -m uvicorn app.main:app --reload
 # python -m streamlit run app\ui\streamlit_app.py
 
 
