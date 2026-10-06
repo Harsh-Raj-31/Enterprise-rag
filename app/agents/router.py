@@ -61,6 +61,7 @@ def query_router(state: AgentState) -> AgentState:
     """
 
     query = state["query"].strip().lower()
+    url = state.get("url")
 
     # ---------------------------------------------------------
     # 1. Employee ID query -> Database
@@ -75,9 +76,8 @@ def query_router(state: AgentState) -> AgentState:
     # ---------------------------------------------------------
     # 2. Explicit URL -> Web
     # ---------------------------------------------------------
-    elif "http://" in query or "https://" in query or "www." in query:
+    elif url or "http://" in query or "https://" in query or "www." in query:
         route = "web"
-
     # ---------------------------------------------------------
     # 3. Web / current information
     # ---------------------------------------------------------

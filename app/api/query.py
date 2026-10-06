@@ -20,6 +20,7 @@ router = APIRouter(
 
 class QueryRequest(BaseModel):
     query: str
+    url: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -43,6 +44,7 @@ def query_endpoint(
         query=request.query,
         user_role=current_user.role,
         user_id=current_user.user_id,
+        url=request.url,
     )
 
     cached_response = cache_service.get(cache_key)
@@ -66,7 +68,14 @@ def query_endpoint(
         result = graph_service.invoke(
             query=request.query,
             user_role=current_user.role,
+            url=request.url,
         )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc        
 
     except PermissionError as exc:
         audit_event(

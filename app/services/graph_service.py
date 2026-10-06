@@ -25,8 +25,10 @@ class GraphService:
         self,
         query: str,
         user_role: str,
+        url: str | None = None,
     ) -> dict:
         return self.graph.invoke({
             "query": query,
             "user_role": user_role,
+            "url": url,
         })

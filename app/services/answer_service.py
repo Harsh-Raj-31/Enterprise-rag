@@ -89,14 +89,44 @@ class AnswerService:
             evidence=context,
         )
 
-        if not grounding_valid:
-            return (
-                "I could not provide a reliable answer "
-                "based on the available knowledge evidence."
-            )
+        if grounding_valid:
+            return answer
 
-        # Return the validated grounded answer.
-        return answer
+        # One controlled retry when the first answer
+        # fails grounding validation.
+        retry_query = f"""
+        Your previous answer failed the grounding check.
+
+        Answer the user's question again using ONLY facts
+        explicitly supported by the provided evidence.
+
+        Requirements:
+        - Do not use outside knowledge.
+        - Do not invent or infer facts.
+        - Keep the answer concise.
+        - Use wording that is directly supported by the evidence.
+
+        User question:
+        {query}
+        """.strip()
+
+        retry_answer = self.llm_service.generate_answer(
+            query=retry_query,
+            context=context,
+        )
+
+        retry_valid = self.grounding_guardrail.validate(
+            answer=retry_answer,
+            evidence=context,
+        )
+
+        if retry_valid:
+            return retry_answer
+
+        return (
+            "I could not provide a reliable answer "
+            "based on the available knowledge evidence."
+        )
 
     def _format_evidence(
         self,
