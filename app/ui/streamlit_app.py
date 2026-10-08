@@ -6,9 +6,6 @@ from pathlib import Path
 import streamlit as st
 
 from app.core.config import MODEL
-from app.ingestion.pdf_loader import PDFLoader
-from app.ingestion.chunker import TextChunker
-from app.services.rag_service import RAGService
 from app.ui.api_client import APIClient
 
 
@@ -23,18 +20,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
 # ===========================================================
 # CONSTANTS
 # ===========================================================
 
-UPLOAD_DIR = Path("data/raw/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 MAX_UPLOAD_MB = 50
-CHUNK_SIZE = 120
-CHUNK_OVERLAP = 20
-
 
 # ============================================================
 # SESSION STATE
@@ -43,10 +33,8 @@ CHUNK_OVERLAP = 20
 DEFAULTS = {
     "history": [],
     "last_result": None,          # persisted so the answer survives reruns
-    "active_pdf_path": None,
     "indexed_document_name": None,
     "index_success_message": None,
-    "pdf_file_version": None,
 
     # FastAPI authentication
     "access_token": None,
@@ -640,43 +628,6 @@ if not st.session_state.access_token:
 
     st.stop()
 
-
-# ===========================================================
-# RAG SERVICE LOADER
-# ===========================================================
-
-@st.cache_resource(show_spinner=False, max_entries=2)
-def load_rag_service(pdf_path: str, file_version: int):
-    """
-    Build a RAG service for the selected PDF.
-    file_version forces a rebuild if a same-named file is replaced.
-    """
-
-    loader = PDFLoader()
-    documents = loader.load(pdf_path)
-
-    if not documents:
-        raise ValueError("The PDF contains no extractable text.")
-
-    chunker = TextChunker(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-    chunks = chunker.chunk_documents(documents)
-
-    if not chunks:
-        raise ValueError("No chunks were generated from the PDF.")
-
-    rag_service = RAGService(chunks)
-    return rag_service, len(chunks)
-
-
-def clear_local_document() -> None:
-    st.session_state.active_pdf_path = None
-    st.session_state.indexed_document_name = None
-    st.session_state.pdf_file_version = None
-    st.session_state.history = []
-    st.session_state.last_result = None
-    load_rag_service.clear()
-
-
 # ===========================================================
 # TOP BAR
 # ===========================================================
@@ -716,6 +667,10 @@ st.markdown(
 <span class="pill">🧬 Hybrid Retrieval</span>
 <span class="pill">🎯 Cross-Encoder Reranking</span>
 <span class="pill">📄 PDF Ingestion</span>
+<span class="pill">🌐 Website Ingestion</span>
+<span class="pill">📊 Spreadsheet Ingestion</span>
+<span class="pill">🗄️ Database Agent</span>
+<span class="pill">🔐 RBAC</span>
 <span class="pill">🤖 {esc(MODEL)}</span>
 <span class="pill">✅ Grounded Answers</span>
 </div>
@@ -725,72 +680,436 @@ st.markdown(
 
 
 # ===========================================================
-# PDF UPLOAD SECTION
+# STEP 1 — ADD KNOWLEDGE SOURCE
 # ===========================================================
 
 st.markdown(
     f"""
-<div class="section-card">
-<div class="section-eyebrow">📥 Step 1</div>
-<div class="section-title">Add Document to Knowledge Base</div>
-<p class="section-subtitle">Upload a PDF (up to {MAX_UPLOAD_MB} MB), index it, then ask questions about its contents.</p>
-</div>
-""",
+    <div class="section-card">
+    <div class="section-eyebrow">📥 Step 1</div>
+    <div class="section-title">Add Knowledge Source</div>
+    <p class="section-subtitle">
+        Add PDF documents, websites, CSV/Excel files, or use the configured
+        enterprise database. Access is controlled by RBAC.
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
-uploaded_file = st.file_uploader(
-    "Upload PDF document",
-    type=["pdf"],
-    help="Upload a PDF document to create a searchable knowledge base.",
+# All authenticated users can request ingestion.
+# The FastAPI backend remains the final authorization authority.
+can_ingest = bool(st.session_state.access_token)
+
+if can_ingest:
+    st.success(
+        f"🔐 Knowledge ingestion enabled for role: "
+        f"**{st.session_state.user_role}**"
+    )
+else:
+    st.info("🔒 Please sign in to add knowledge sources.")
+
+
+source_tab_pdf, source_tab_web, source_tab_spreadsheet, source_tab_database = st.tabs(
+    [
+        "📄 PDF",
+        "🌐 Website",
+        "📊 CSV / Excel",
+        "🗄️ Database",
+    ]
 )
 
+# -----------------------------------------------------------
+# PDF KNOWLEDGE SOURCE
+# -----------------------------------------------------------
 
-# ===========================================================
-# PDF INDEXING
-# ===========================================================
+with source_tab_pdf:
 
-if uploaded_file is not None:
+    st.markdown("### 📄 PDF Knowledge")
 
-    # Strip any path and unsafe characters from the client-supplied name.
-    safe_filename = re.sub(r"[^A-Za-z0-9._ -]", "_", Path(uploaded_file.name).name) or "document.pdf"
+    st.caption(
+        "Upload a PDF and store its chunks in the enterprise knowledge base "
+        "through the authenticated FastAPI ingestion pipeline."
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload PDF document",
+        type=["pdf"],
+        help="Upload a PDF document to the enterprise knowledge base.",
+        key="pdf_knowledge_file",
+        disabled=not can_ingest,
+    )
+
+    pdf_roles = st.multiselect(
+        "Who can access this PDF's knowledge?",
+        options=[
+            "employee",
+            "manager",
+            "hr",
+            "admin",
+        ],
+        default=[
+            "employee",
+            "manager",
+            "hr",
+            "admin",
+        ],
+        key="ingest_pdf_roles",
+        disabled=not can_ingest,
+    )
+
+    if uploaded_file is not None:
+
+        safe_filename = (
+            re.sub(
+                r"[^A-Za-z0-9._ -]",
+                "_",
+                Path(uploaded_file.name).name,
+            )
+            or "document.pdf"
+        )
+
+        st.markdown(
+            f"""
+            <div class="selected-file">
+                📄 {esc(safe_filename)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        too_large = uploaded_file.size > MAX_UPLOAD_MB * 1024 * 1024
+
+        if too_large:
+            st.error(
+                f"This file is larger than {MAX_UPLOAD_MB} MB."
+            )
+
+        ingest_pdf_button = st.button(
+            "📄 Ingest PDF",
+            type="primary",
+            disabled=(
+                uploaded_file is None
+                or too_large
+                or not can_ingest
+            ),
+            key="ingest_pdf_button",
+        )
+
+        if ingest_pdf_button:
+
+            if not pdf_roles:
+                st.warning(
+                    "Select at least one role that can access this PDF."
+                )
+
+            elif not st.session_state.access_token:
+                st.error(
+                    "You must be logged in to ingest knowledge."
+                )
+
+            else:
+
+                try:
+
+                    with st.spinner(
+                        "Uploading, processing and indexing PDF..."
+                    ):
+
+                        result = api_client.ingest_pdf(
+                            token=st.session_state.access_token,
+                            file_bytes=uploaded_file.getvalue(),
+                            filename=safe_filename,
+                            allowed_roles=pdf_roles,
+                        )
+
+                    st.session_state.indexed_document_name = safe_filename
+                    st.session_state.history = []
+                    st.session_state.last_result = None
+
+                    st.session_state.index_success_message = (
+                        f"Successfully indexed '{safe_filename}' — "
+                        f"{result.get('chunks_ingested', 0)} chunks added."
+                    )
+
+                    st.success(
+                        f"PDF indexed successfully — "
+                        f"{result.get('chunks_ingested', 0)} chunks added."
+                    )
+
+                    st.json(result)
+
+                except Exception as error:
+
+                    if is_auth_error(error):
+                        reset_auth(
+                            "Your session has expired. Please log in again."
+                        )
+                        st.rerun()
+
+                    st.error(
+                        f"Unable to ingest PDF: {error}"
+                    )
+
+# -----------------------------------------------------------
+# WEBSITE KNOWLEDGE SOURCE
+# -----------------------------------------------------------
+
+with source_tab_web:
+
+    st.markdown("### 🌐 Website Knowledge")
+
+    st.caption(
+        "Fetch, clean, chunk and store website content in the "
+        "enterprise vector knowledge base."
+    )
+
+    website_url = st.text_input(
+        "Website URL",
+        placeholder="https://example.com",
+        key="ingest_website_url",
+        help=(
+            "The website will be fetched, cleaned, chunked and "
+            "stored in the vector knowledge base."
+        ),
+        disabled=not can_ingest,
+    )
+
+    website_roles = st.multiselect(
+        "Who can access this website's knowledge?",
+        options=[
+            "employee",
+            "manager",
+            "hr",
+            "admin",
+        ],
+        default=[
+            "employee",
+            "manager",
+            "hr",
+            "admin",
+        ],
+        key="ingest_website_roles",
+        disabled=not can_ingest,
+    )
+
+    ingest_website_button = st.button(
+        "🌐 Ingest Website",
+        type="primary",
+        key="ingest_website_button",
+        disabled=not can_ingest,
+    )
+
+    if ingest_website_button:
+
+        if not website_url.strip():
+            st.warning("Please enter a website URL.")
+
+        elif not st.session_state.access_token:
+            st.error("You must be logged in to ingest knowledge.")
+
+        elif not website_roles:
+            st.warning(
+                "Select at least one role that can access this website."
+            )
+
+        else:
+
+            try:
+
+                with st.spinner(
+                    "Fetching, cleaning and indexing website..."
+                ):
+
+                    result = api_client.ingest_website(
+                        token=st.session_state.access_token,
+                        url=website_url.strip(),
+                        allowed_roles=website_roles,
+                    )
+
+                st.success(
+                    "Website indexed successfully — "
+                    f"{result.get('chunks_ingested', 0)} chunks added."
+                )
+
+                st.json(result)
+
+            except Exception as error:
+
+                if is_auth_error(error):
+                    reset_auth(
+                        "Your session has expired. Please log in again."
+                    )
+                    st.rerun()
+
+                st.error(
+                    f"Unable to ingest website: {error}"
+                )
+
+
+# -----------------------------------------------------------
+# SPREADSHEET KNOWLEDGE SOURCE
+# -----------------------------------------------------------
+
+with source_tab_spreadsheet:
+
+    st.markdown("### 📊 Spreadsheet Knowledge")
+
+    st.caption(
+        "Upload CSV or Excel data and convert rows into searchable "
+        "knowledge records."
+    )
+
+    spreadsheet_file = st.file_uploader(
+        "Upload CSV or Excel file",
+        type=[
+            "csv",
+            "xlsx",
+            "xls",
+        ],
+        key="ingest_spreadsheet_file",
+        help="Rows will be converted into searchable knowledge records.",
+        disabled=not can_ingest,
+    )
+
+    spreadsheet_roles = st.multiselect(
+        "Who can access this spreadsheet's knowledge?",
+        options=[
+            "employee",
+            "manager",
+            "hr",
+            "admin",
+        ],
+        default=[
+            "employee",
+            "manager",
+            "hr",
+            "admin",
+        ],
+        key="ingest_spreadsheet_roles",
+        disabled=not can_ingest,
+    )
+
+    if spreadsheet_file is not None:
+
+        st.markdown(
+            f"""
+            <div class="selected-file">
+                📊 {esc(Path(spreadsheet_file.name).name)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        spreadsheet_too_large = (
+            spreadsheet_file.size
+            > MAX_UPLOAD_MB * 1024 * 1024
+        )
+
+        if spreadsheet_too_large:
+            st.error(
+                f"This file is larger than {MAX_UPLOAD_MB} MB."
+            )
+
+    else:
+        spreadsheet_too_large = False
+
+    ingest_spreadsheet_button = st.button(
+        "📊 Ingest Spreadsheet",
+        type="primary",
+        disabled=(
+            spreadsheet_file is None
+            or spreadsheet_too_large
+            or not can_ingest
+        ),
+        key="ingest_spreadsheet_button",
+    )
+
+    if ingest_spreadsheet_button:
+
+        if not spreadsheet_roles:
+            st.warning(
+                "Select at least one role that can access this spreadsheet."
+            )
+
+        elif not st.session_state.access_token:
+            st.error("You must be logged in to ingest knowledge.")
+
+        else:
+
+            try:
+
+                with st.spinner(
+                    "Uploading, processing and indexing spreadsheet..."
+                ):
+
+                    result = api_client.ingest_spreadsheet(
+                        token=st.session_state.access_token,
+                        file_bytes=spreadsheet_file.getvalue(),
+                        filename=spreadsheet_file.name,
+                        allowed_roles=spreadsheet_roles,
+                    )
+
+                st.success(
+                    "Spreadsheet indexed successfully — "
+                    f"{result.get('chunks_ingested', 0)} chunks added."
+                )
+
+                st.json(result)
+
+            except Exception as error:
+
+                if is_auth_error(error):
+                    reset_auth(
+                        "Your session has expired. Please log in again."
+                    )
+                    st.rerun()
+
+                st.error(
+                    f"Unable to ingest spreadsheet: {error}"
+                )
+
+
+# -----------------------------------------------------------
+# DATABASE KNOWLEDGE SOURCE
+# -----------------------------------------------------------
+
+with source_tab_database:
+
+    st.markdown("### 🗄️ Database Knowledge")
+
+    st.info(
+        """
+        **Database retrieval is automatic.**
+
+        The Enterprise RAG system connects to the configured database
+        through the Database Agent. You do not upload the database
+        from this interface.
+
+        Try questions such as:
+
+        • Who works in Engineering?
+
+        • Which employees are in Finance?
+
+        • What is the record for employee 104?
+
+        Database access is controlled by the backend RBAC system.
+        """
+    )
 
     st.markdown(
-        f"""<div class="selected-file">📄 {esc(safe_filename)}</div>""",
+        """
+        <div class="feature-note">
+        <strong>🔐 Secure database workflow</strong><br>
+        User Query → DB Agent → Schema Discovery → Permission Check →
+        Parameterized SQL → Structured Result → Grounded Answer
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    too_large = uploaded_file.size > MAX_UPLOAD_MB * 1024 * 1024
-    if too_large:
-        st.error(f"This file is larger than {MAX_UPLOAD_MB} MB.")
 
-    do_index = st.button("🚀 Index PDF", type="primary", disabled=too_large)
-
-    if do_index:
-        try:
-            destination = UPLOAD_DIR / safe_filename
-
-            with open(destination, "wb") as file:
-                file.write(uploaded_file.getbuffer())
-
-            file_version = destination.stat().st_mtime_ns
-
-            # Load once here (result is cached), so errors surface at click time
-            # and the page never re-runs a failing load on every interaction.
-            with st.spinner("Reading, chunking and indexing the PDF..."):
-                load_rag_service(str(destination), file_version)
-
-            st.session_state.active_pdf_path = str(destination)
-            st.session_state.indexed_document_name = safe_filename
-            st.session_state.pdf_file_version = file_version
-            st.session_state.history = []
-            st.session_state.last_result = None
-            st.session_state.index_success_message = f"Successfully indexed '{safe_filename}'."
-
-            st.rerun()
-
-        except Exception as error:
-            st.error(f"Unable to index PDF: {error}")
+st.write("")
 
 
 # ===========================================================
@@ -800,47 +1119,6 @@ if uploaded_file is not None:
 if st.session_state.index_success_message:
     st.success(st.session_state.index_success_message)
     st.session_state.index_success_message = None
-
-
-# ===========================================================
-# KNOWLEDGE BASE STATUS
-# ===========================================================
-
-active_pdf_path = st.session_state.active_pdf_path
-active_document_name = st.session_state.indexed_document_name
-
-chunk_count = 0
-rag_service = None
-
-if active_pdf_path is None:
-
-    st.markdown(
-        """
-<div class="empty-state">
-📚 No local PDF is currently indexed.<br>Upload a PDF above to process a document locally, or query the server knowledge base directly.
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-else:
-    active_path = Path(active_pdf_path)
-
-    if not active_path.exists():
-        clear_local_document()
-        st.rerun()
-
-    file_version = st.session_state.get("pdf_file_version") or active_path.stat().st_mtime_ns
-
-    try:
-        with st.spinner("Preparing the knowledge base..."):
-            rag_service, chunk_count = load_rag_service(str(active_path), file_version)
-    except Exception as error:
-        st.error(f"Unable to load the indexed document: {error}")
-        clear_local_document()
-        active_pdf_path = None
-        active_document_name = None
-
 
 # ===========================================================
 # STAT CARDS
@@ -854,28 +1132,85 @@ def stat_card(icon: str, tone: str, value, label: str, small: bool = False) -> s
 <div><div class="stat-value"{size}>{esc(value)}</div><div class="stat-label">{label}</div></div>
 </div>
 """
-
-
 m1, m2, m3, m4 = st.columns(4)
 
 with m1:
-    st.markdown(stat_card("🧩", "indigo", chunk_count, "Knowledge Chunks"), unsafe_allow_html=True)
+    st.markdown(
+        stat_card(
+            "🧩",
+            "indigo",
+            "Server KB",
+            "Knowledge Chunks",
+        ),
+        unsafe_allow_html=True,
+    )
 
 with m2:
-    st.markdown(stat_card("📄", "emerald", 1 if active_pdf_path else 0, "Documents"), unsafe_allow_html=True)
+    st.markdown(
+        stat_card(
+            "📚",
+            "emerald",
+            "Multi-source",
+            "Knowledge Sources",
+        ),
+        unsafe_allow_html=True,
+    )
 
 with m3:
-    st.markdown(stat_card("🤖", "amber", MODEL, "LLM", small=True), unsafe_allow_html=True)
+    st.markdown(
+        stat_card(
+            "🤖",
+            "amber",
+            MODEL,
+            "LLM",
+            small=True,
+        ),
+        unsafe_allow_html=True,
+    )
 
 with m4:
     questions_metric = st.empty()
     questions_metric.markdown(
-        stat_card("💬", "rose", len(st.session_state.history), "Questions Asked"),
+        stat_card(
+            "💬",
+            "rose",
+            len(st.session_state.history),
+            "Questions Asked",
+        ),
         unsafe_allow_html=True,
     )
 
-st.write("")
+# ===========================================================
+# KNOWLEDGE BASE STATUS
+# ===========================================================
 
+active_document_name = st.session_state.indexed_document_name
+
+st.markdown(
+    """
+    <div class="section-card">
+        <div class="section-eyebrow">🧠 Knowledge Base</div>
+        <div class="section-title">Enterprise Knowledge Base</div>
+        <p class="section-subtitle">
+            Authenticated server-side knowledge from PDF, Website,
+            CSV/Excel and Database sources.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+if active_document_name:
+    st.success(
+        f"Latest ingested document: **{esc(active_document_name)}**"
+    )
+else:
+    st.info(
+        "No document has been ingested during this session yet. "
+        "The enterprise knowledge base may already contain indexed sources."
+    )
+
+chunk_count = "Server KB"
 
 # ===========================================================
 # SIDEBAR — nav rail
@@ -899,35 +1234,41 @@ with st.sidebar:
 
     st.header("📚 Knowledge Base")
 
-    if active_pdf_path:
-        st.success("Knowledge Base Online")
+    st.success("Enterprise Knowledge Base Online")
+
+    st.markdown("**Available Sources**")
+    st.markdown("📄 PDF")
+    st.markdown("🌐 Website")
+    st.markdown("📊 CSV / Excel")
+    st.markdown("🗄️ Database")
+
+    if active_document_name:
         st.divider()
-        st.markdown("**Current Document**")
-        st.markdown(f"📄 `{active_document_name}`")
-        st.markdown("**Knowledge Chunks**")
-        st.markdown(f"`{chunk_count}`")
+        st.markdown("**Latest Ingestion**")
+        st.markdown(f"📄 `{esc(active_document_name)}`")
 
-        if st.button("🗑️ Clear Knowledge Base", use_container_width=True):
-            clear_local_document()
-            st.rerun()
-
-    else:
-        st.info("Using the server knowledge base.")
-        st.markdown("You can upload and index a PDF above for local document processing.")
+    st.caption(
+        "The enterprise knowledge base is accessed through "
+        "FastAPI, JWT authentication, RBAC and the agent routing layer."
+    )
 
     st.divider()
 
     st.header("🏗️ Architecture")
 
     steps = [
-        "PDF Upload",
-        "PDF Processing",
-        "Smart Chunking",
+        "Multi-Source Ingestion",
+        "PDF / Web / CSV / Excel / DB",
+        "Data Cleaning & Chunking",
+        "Embeddings",
         "Hybrid Retrieval",
         "Cross-Encoder Reranker",
+        "RBAC & Access Control",
+        "LangGraph Agent Routing",
         "Grounded Context",
         "LiteLLM Gateway",
         MODEL,
+        "Guardrails",
         "Answer + Sources",
     ]
 
@@ -1040,7 +1381,7 @@ if ask_button:
                     reset_auth("Your session has expired. Please sign in again.")
                     st.rerun()
                 else:
-                    st.error(f"Unable to generate answer: {error}")                
+                    st.error(f"Unable to generate answer: {error}")
 
 
 
@@ -1069,25 +1410,86 @@ if last_result:
         st.info("No sources were returned for this answer.")
 
     for index, source in enumerate(last_result["sources"], start=1):
+        source_type = str(
+            source.get("document_type")
+            or source.get("type")
+            or source.get("source_type")
+            or ""
+        ).lower()
+
+        source_name = esc(source.get("source", "Unknown source"))
+        chunk_id = esc(source.get("chunk_id", "Unknown"))
+
         score = to_float(source.get("rerank_score"))
+        if score is None:
+            score = to_float(source.get("distance"))
+
         badge_class = score_class(score)
         score_text = f"{score:.4f}" if score is not None else "n/a"
 
-        source_name = esc(source.get("source", "Unknown source"))
-        page = esc(source.get("page", "Unknown"))
-        chunk_id = esc(source.get("chunk_id", "Unknown"))
+        metadata_parts = []
+
+        # PDF
+        if source.get("page") is not None:
+            metadata_parts.append(
+                f"📑 Page {esc(source.get('page'))}"
+            )
+
+        # Website
+        if source.get("url"):
+            metadata_parts.append(
+                f"🌐 URL {esc(source.get('url'))}"
+            )
+
+        # Spreadsheet
+        if source.get("sheet") is not None:
+            metadata_parts.append(
+                f"📋 Sheet {esc(source.get('sheet'))}"
+            )
+
+        if source.get("row") is not None:
+            metadata_parts.append(
+                f"📍 Row {esc(source.get('row'))}"
+            )
+
+        # Database
+        if source.get("table"):
+            metadata_parts.append(
+                f"📋 Table {esc(source.get('table'))}"
+            )
+
+        if source.get("employee_id") is not None:
+            metadata_parts.append(
+                f"👤 Employee ID {esc(source.get('employee_id'))}"
+            )
+
+        # Chunk information
+        if source.get("chunk_id"):
+            metadata_parts.append(
+                f"🔗 Chunk {chunk_id}"
+            )
+
+        # Score
+        if score is not None:
+            metadata_parts.append(
+                f'<span class="score-badge {badge_class}">🎯 {score_text}</span>'
+            )
+
+        metadata_html = "\n".join(
+            f"<span>{item}</span>" for item in metadata_parts
+        )
 
         st.markdown(
             f"""
-<div class="source-card">
-<div class="source-title">Source {index} — {source_name}</div>
-<div class="source-meta">
-<span>📑 Page {page}</span>
-<span>🔗 Chunk {chunk_id}</span>
-<span class="score-badge {badge_class}">🎯 {score_text}</span>
-</div>
-</div>
-""",
+            <div class="source-card">
+                <div class="source-title">
+                    Source {index} — {source_name}
+                </div>
+                <div class="source-meta">
+                    {metadata_html}
+                </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -1103,12 +1505,14 @@ if last_result:
 1. Streamlit UI
 2. FastAPI authentication / JWT
 3. Redis cache lookup
-4. LangGraph routing
-5. Hybrid retrieval + reranking
-6. Relevant evidence selection
-7. {MODEL} generation
-8. Guardrails / grounding validation
-9. Answer + sources
+4. RBAC authorization
+5. LangGraph routing
+6. Source-specific retrieval
+7. Authorized evidence filtering
+8. Hybrid retrieval + reranking
+9. {MODEL} generation
+10. Guardrails / grounding validation
+11. Answer + sources
 
 **Response time:** `{last_result["elapsed"]:.2f} seconds`
 
@@ -1118,7 +1522,4 @@ if last_result:
 
 **Gateway:** `LiteLLM`
 """
-        )
-
-elif rag_service is None:
-    st.info("💡 You can ask questions against the server knowledge base, or upload a PDF above for local processing.")
+ )

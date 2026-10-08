@@ -108,6 +108,27 @@ class GroundingGuardrail:
             flags=re.IGNORECASE,
         )
 
+        # Remove "See filename.pdf, page N".
+        answer = re.sub(
+            r"\bsee\s+"
+            r"[^,\n]+?\.(?:pdf|txt|docx?)"
+            r"\s*,\s*(?:page|p\.)\s*\d+"
+            r"\.?",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+
+        # Remove "Source: filename.csv/xlsx/xls".
+        answer = re.sub(
+            r"\bsource\s*:\s*"
+            r"[^,\n]+?\.(?:csv|xlsx?|xls)"
+            r"\.?",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+
         return answer
 
     def _has_numeric_contradiction(
@@ -193,14 +214,38 @@ class GroundingGuardrail:
         text: str,
     ) -> set[str]:
 
+        # Normalize structured text such as:
+        # "name: Ananya Singh | role:AI Engineer"
+        # into individual searchable words.
+        words = re.findall(
+            r"[a-zA-Z0-9]+(?:['-][a-zA-Z0-9]+)*",
+            text.lower(),
+        )
+
+        # Ignore common stop words that do not carry
+        # factual meaning for grounding validation.
+        stop_words = {
+            "the",
+            "is",
+            "a",
+            "an",
+            "and",
+            "or",
+            "of",
+            "to",
+            "in",
+            "on",
+            "for",
+            "with",
+            "who",
+            "what",
+            "which",
+            "source",
+        }
+
         return {
-            word.strip(
-                ".,!?;:\"'()[]{}"
-            )
-            for word in text.lower().split()
-            if len(
-                word.strip(
-                    ".,!?;:\"'()[]{}"
-                )
-            ) > 2
+            word
+            for word in words
+            if len(word) > 2
+            and word not in stop_words
         }

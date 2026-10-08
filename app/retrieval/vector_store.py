@@ -78,3 +78,50 @@ class VectorStore:
         """
 
         return self.collection.count()
+
+    def delete_documents(
+        self,
+        ids: list[str],
+    ):
+        """
+        Delete specific document chunks by ID.
+        """
+
+        if not ids:
+            return
+
+        self.collection.delete(
+            ids=ids
+        )
+
+    def delete_by_source(
+        self,
+        source: str,
+    ):
+        """
+        Delete all document chunks belonging to a source.
+        """
+
+        if not source or not source.strip():
+            raise ValueError(
+                "Source cannot be empty."
+            )
+
+        results = self.collection.get(
+            where={
+                "source": source.strip()
+            },
+            include=[],
+        )
+
+        ids = results.get("ids", [])
+
+        if ids:
+            self.collection.delete(
+                ids=ids
+            )
+
+        return {
+            "source": source.strip(),
+            "deleted_chunks": len(ids),
+        }

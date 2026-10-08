@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.security.rate_limiter import RateLimiter
+from app.api.ingestion import router as ingestion_router
 
 app = FastAPI(
     title="Enterprise Knowledge Base & RAG",
@@ -20,6 +21,7 @@ rate_limiter = RateLimiter(
 )
 app.include_router(auth_router)
 app.include_router(query_router)
+app.include_router(ingestion_router)
 
 @app.get("/")
 def root():

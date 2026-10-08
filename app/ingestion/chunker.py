@@ -127,12 +127,37 @@ class TextChunker:
 
                 chunk_metadata = metadata.copy()
 
-                chunk_metadata.update({
-                    "chunk_id": (
+                if "page" in metadata:
+                    chunk_id = (
                         f"{metadata['source']}"
                         f"_p{metadata['page']}"
                         f"_c{index}"
-                    ),
+                    )
+
+                elif "row" in metadata:
+
+                    if "sheet" in metadata:
+                        chunk_id = (
+                            f"{metadata['source']}"
+                            f"_{metadata['sheet']}"
+                            f"_r{metadata['row']}"
+                            f"_c{index}"
+                        )
+                    else:
+                        chunk_id = (
+                            f"{metadata['source']}"
+                            f"_r{metadata['row']}"
+                            f"_c{index}"
+                        )
+
+                else:
+                    chunk_id = (
+                        f"{metadata['source']}"
+                        f"_c{index}"
+                    )
+
+                chunk_metadata.update({
+                    "chunk_id": chunk_id,
                     "chunk_index": index,
                 })
 
@@ -150,14 +175,25 @@ class TextChunker:
                             "at least one valid role."
                         )
 
-                    # Keep the human-readable role list
+                    # Keep the human-readable role list.
                     chunk_metadata["allowed_roles"] = sorted(
                         normalized_roles
                     )
 
-                    # Scalar fields used for ChromaDB filtering
-                    for role in normalized_roles:
-                        chunk_metadata[f"access_{role}"] = True
+                    # Explicitly set every supported role.
+                    # This prevents stale metadata from previous
+                    # ingestion operations from granting access.
+                    supported_roles = {
+                        "employee",
+                        "manager",
+                        "hr",
+                        "admin",
+                    }
+
+                    for role in supported_roles:
+                        chunk_metadata[f"access_{role}"] = (
+                            role in normalized_roles
+                        )
 
                 chunks.append(
                     {
@@ -166,4 +202,4 @@ class TextChunker:
                     }
                 )
 
-        return chunks 
+        return chunks

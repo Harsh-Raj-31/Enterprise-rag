@@ -38,3 +38,35 @@ class AccessController:
                 f"Access denied: role '{user.role}' "
                 f"cannot access '{source}'."
             )
+
+
+    def can_perform(
+        self,
+        user: User,
+        action: str,
+    ) -> bool:
+        """
+        Check whether the user's role can perform
+        a specific system action.
+        """
+
+        permissions = get_role_permissions(user.role)
+
+        return permissions.can_perform(action)
+
+    def require_action(
+        self,
+        user: User,
+        action: str,
+    ) -> None:
+        """
+        Enforce permission to perform a system action.
+
+        Raises PermissionError when the action is denied.
+        """
+
+        if not self.can_perform(user, action):
+            raise PermissionError(
+                f"Access denied: role '{user.role}' "
+                f"cannot perform '{action}'."
+            )

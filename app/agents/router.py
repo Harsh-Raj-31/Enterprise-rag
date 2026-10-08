@@ -32,6 +32,25 @@ DB_KEYWORDS = {
     "user record",
 }
 
+SPREADSHEET_KEYWORDS = {
+    "spreadsheet",
+    "csv",
+    "excel",
+    "xlsx",
+    "worksheet",
+    "row",
+    "rows",
+    "column",
+    "columns",
+    "sheet",
+    "sheets",
+    "employee list",
+    "employee directory",
+    "staff list",
+    "department list",
+    "designation list",
+}
+
 PDF_KEYWORDS = {
     "document",
     "documents",
@@ -46,6 +65,15 @@ PDF_KEYWORDS = {
     "guidelines",
 }
 
+EMPLOYEE_DIRECTORY_KEYWORDS = {
+    "who is the",
+    "who is",
+    "who works",
+    "who works in",
+    "which employee",
+    "which employees",
+}
+
 
 def query_router(state: AgentState) -> AgentState:
     """
@@ -56,8 +84,9 @@ def query_router(state: AgentState) -> AgentState:
     2. Explicit URL -> Web
     3. Web/current-information keywords -> Web
     4. Database keywords -> DB
-    5. PDF/knowledge-base keywords -> PDF
-    6. Default -> PDF
+    5. Spreadsheet / employee directory -> Spreadsheet
+    . PDF/knowledge-base keywords -> PDF
+    7. Default -> PDF
     """
 
     query = state["query"].strip().lower()
@@ -85,19 +114,37 @@ def query_router(state: AgentState) -> AgentState:
         route = "web"
 
     # ---------------------------------------------------------
-    # 4. Database
+    # 4. Database / structured employee directory
     # ---------------------------------------------------------
-    elif any(keyword in query for keyword in DB_KEYWORDS):
+    elif (
+        any(keyword in query for keyword in DB_KEYWORDS)
+        or any(
+            phrase in query
+            for phrase in EMPLOYEE_DIRECTORY_KEYWORDS
+        )
+    ):
         route = "db"
 
     # ---------------------------------------------------------
     # 5. PDF / Knowledge Base
     # ---------------------------------------------------------
-    elif any(keyword in query for keyword in PDF_KEYWORDS):
+    elif any(
+        keyword in query
+        for keyword in PDF_KEYWORDS
+    ):
         route = "pdf"
 
     # ---------------------------------------------------------
-    # 6. Default
+    # 6. Spreadsheet / CSV / Excel
+    # ---------------------------------------------------------
+    elif any(
+        keyword in query
+        for keyword in SPREADSHEET_KEYWORDS
+    ):
+        route = "spreadsheet"
+
+    # ---------------------------------------------------------
+    # 7. Default
     # ---------------------------------------------------------
     else:
         route = "pdf"

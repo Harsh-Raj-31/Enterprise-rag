@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.security.auth import login
+from app.security.auth import decode_access_token, login
 
 
 router = APIRouter(
@@ -18,6 +18,8 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    username: str
+    role: str
 
 
 @router.post(
@@ -39,6 +41,10 @@ def login_endpoint(request: LoginRequest):
             detail=str(exc),
         ) from exc
 
+    user = decode_access_token(token)
+
     return LoginResponse(
         access_token=token,
+        username=user.username,
+        role=user.role,
     )

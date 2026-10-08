@@ -36,3 +36,5 @@ Thumbs.db
 # Local/sample data
 data/raw/uploads/
 data/sample/
+
+data/raw/*.pdf
