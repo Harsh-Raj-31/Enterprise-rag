@@ -8,6 +8,7 @@ from app.security.models import User
 from app.security.users import authenticate_user
 from app.security.audit import audit_event
 
+
 load_dotenv()
 
 

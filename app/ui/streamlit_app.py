@@ -41,6 +41,8 @@ DEFAULTS = {
     "username": None,
     "user_role": None,
     "auth_notice": None,
+    "auth_page": "Login",
+    "reset_token": None,
 }
 
 for _key, _value in DEFAULTS.items():
@@ -583,8 +585,35 @@ def login_user(username: str, password: str) -> bool:
 
 
 # ============================================================
-# LOGIN SCREEN
+# LOGIN SCREEN + ACCOUNT RECOVERY
 # ============================================================
+
+def password_policy_error(password: str) -> str | None:
+    """Return a user-friendly explanation when a password fails policy."""
+    if len(password) < 12:
+        return "Use at least 12 characters."
+    if len(password.encode("utf-8")) > 72:
+        return "Password must be no more than 72 UTF-8 bytes."
+    if not any(char.isupper() for char in password):
+        return "Include at least one uppercase letter."
+    if not any(char.islower() for char in password):
+        return "Include at least one lowercase letter."
+    if not any(char.isdigit() for char in password):
+        return "Include at least one number."
+    return None
+
+
+# If the user opens the emailed reset link, load the token from the URL.
+# The token is kept in session state and is never written to application logs.
+try:
+    _query_reset_token = st.query_params.get("reset_token", "")
+    if _query_reset_token:
+        st.session_state.reset_token = str(_query_reset_token)
+        st.session_state.auth_page = "Reset Password"
+except Exception:
+    # Keep the login screen usable on Streamlit versions without query_params.
+    pass
+
 
 if not st.session_state.access_token:
 
@@ -608,23 +637,205 @@ if not st.session_state.access_token:
             st.warning(st.session_state.auth_notice)
 
         with st.container(key="login-card"):
-            with st.form("login_form"):
+            auth_page = st.radio(
+                "Account access",
+                options=["Login", "Sign Up", "Forgot Password", "Reset Password"],
+                horizontal=True,
+                key="auth_page",
+                label_visibility="collapsed",
+            )
 
-                st.subheader("Sign in")
+            if auth_page == "Login":
+                with st.form("login_form"):
+                    st.subheader("Sign in")
 
-                username = st.text_input("Username", placeholder="Enter your username")
-                password = st.text_input("Password", type="password", placeholder="Enter your password")
+                    username = st.text_input(
+                        "Username",
+                        placeholder="Enter your username",
+                    )
+                    password = st.text_input(
+                        "Password",
+                        type="password",
+                        placeholder="Enter your password",
+                    )
 
-                submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
+                    submitted = st.form_submit_button(
+                        "Login",
+                        type="primary",
+                        use_container_width=True,
+                    )
 
-                if submitted:
-                    if not username.strip() or not password:
-                        st.error("Please enter both username and password.")
-                    else:
-                        with st.spinner("Signing in..."):
-                            ok = login_user(username.strip(), password)
-                        if ok:
-                            st.rerun()
+                    if submitted:
+                        if not username.strip() or not password:
+                            st.error("Please enter both username and password.")
+                        else:
+                            with st.spinner("Signing in..."):
+                                ok = login_user(username.strip(), password)
+                            if ok:
+                                st.rerun()
+
+            elif auth_page == "Sign Up":
+                with st.form("signup_form"):
+                    st.subheader("Create an account")
+
+                    full_name = st.text_input(
+                        "Full name",
+                        placeholder="Enter your full name",
+                    )
+                    signup_username = st.text_input(
+                        "Username",
+                        placeholder="Choose a username",
+                    )
+                    signup_email = st.text_input(
+                        "Email address",
+                        placeholder="you@example.com",
+                    )
+                    signup_password = st.text_input(
+                        "Password",
+                        type="password",
+                        help="At least 12 characters, including uppercase, lowercase, and a number.",
+                    )
+                    confirm_password = st.text_input(
+                        "Confirm password",
+                        type="password",
+                    )
+
+                    signup_submitted = st.form_submit_button(
+                        "Create account",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                    if signup_submitted:
+                        if not all(
+                            value.strip()
+                            for value in (full_name, signup_username, signup_email)
+                        ) or not signup_password or not confirm_password:
+                            st.error("Please complete every field.")
+                        elif signup_password != confirm_password:
+                            st.error("The passwords do not match.")
+                        else:
+                            password_error = password_policy_error(signup_password)
+                            if password_error:
+                                st.error(f"Password requirements: {password_error}")
+                            else:
+                                try:
+                                    with st.spinner("Creating your account..."):
+                                        result = api_client.signup(
+                                            full_name=full_name.strip(),
+                                            username=signup_username.strip(),
+                                            email=signup_email.strip(),
+                                            password=signup_password,
+                                        )
+                                    st.success(
+                                        result.get(
+                                            "message",
+                                            "Account created successfully. Select Login to sign in.",
+                                        )
+                                    )
+                                    st.info("Select **Login** above to sign in with your new account.")
+                                except Exception as exc:
+                                    st.error(f"Unable to create account: {exc}")
+
+            elif auth_page == "Forgot Password":
+                with st.form("forgot_password_form"):
+                    st.subheader("Forgot your password?")
+                    st.write(
+                        "Enter the email address associated with your account. "
+                        "If an account matches, you'll receive password-reset instructions."
+                    )
+                    recovery_email = st.text_input(
+                        "Email address",
+                        placeholder="you@example.com",
+                    )
+
+                    forgot_submitted = st.form_submit_button(
+                        "Send reset link",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                    if forgot_submitted:
+                        if not recovery_email.strip():
+                            st.error("Please enter your email address.")
+                        else:
+                            try:
+                                with st.spinner("Requesting password-reset email..."):
+                                    result = api_client.forgot_password(
+                                        recovery_email.strip()
+                                    )
+                                st.success(
+                                    result.get(
+                                        "message",
+                                        "If an account matches that email, password-reset instructions will be sent.",
+                                    )
+                                )
+                                st.caption(
+                                    "For account security, this confirmation does not reveal "
+                                    "whether the email address is registered."
+                                )
+                            except Exception as exc:
+                                st.error(f"Unable to request a reset link: {exc}")
+
+            elif auth_page == "Reset Password":
+                st.subheader("Set a new password")
+                st.write("Use the reset link from your email, or paste your reset token below.")
+
+                with st.form("reset_password_form"):
+                    reset_token_input = st.text_input(
+                        "Reset token",
+                        value=st.session_state.reset_token or "",
+                        type="password",
+                        help="When you open the reset link from your email, this field is filled automatically.",
+                    )
+                    new_password = st.text_input(
+                        "New password",
+                        type="password",
+                        help="At least 12 characters, including uppercase, lowercase, and a number.",
+                    )
+                    confirm_new_password = st.text_input(
+                        "Confirm new password",
+                        type="password",
+                    )
+
+                    reset_submitted = st.form_submit_button(
+                        "Reset password",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                    if reset_submitted:
+                        if not reset_token_input.strip():
+                            st.error("The reset token is missing. Open the emailed link or paste the token.")
+                        elif not new_password or not confirm_new_password:
+                            st.error("Please enter and confirm your new password.")
+                        elif new_password != confirm_new_password:
+                            st.error("The passwords do not match.")
+                        else:
+                            password_error = password_policy_error(new_password)
+                            if password_error:
+                                st.error(f"Password requirements: {password_error}")
+                            else:
+                                try:
+                                    with st.spinner("Updating your password..."):
+                                        result = api_client.reset_password(
+                                            token=reset_token_input.strip(),
+                                            new_password=new_password,
+                                        )
+                                    st.success(
+                                        result.get(
+                                            "message",
+                                            "Password reset successfully. Select Login to sign in.",
+                                        )
+                                    )
+                                    st.session_state.reset_token = None
+                                    try:
+                                        st.query_params.clear()
+                                    except Exception:
+                                        pass
+                                    st.info("Your reset link has been used. Select **Login** above to sign in.")
+                                except Exception as exc:
+                                    st.error(f"Unable to reset password: {exc}")
 
     st.stop()
 

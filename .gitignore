@@ -19,6 +19,11 @@ __pycache__/
 # Vector databases / generated local data
 chroma_db/
 
+# Local authentication database
+data/auth/
+*.sqlite3
+*.db
+
 # Logs
 *.log
 

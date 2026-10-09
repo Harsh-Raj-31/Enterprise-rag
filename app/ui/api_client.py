@@ -5,7 +5,13 @@ class APIClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8000"):
         self.base_url = base_url.rstrip("/")
 
+    # ========================================================
+    # LOGIN
+    # ========================================================
+
     def login(self, username: str, password: str) -> dict:
+        """Authenticate a user through FastAPI."""
+
         response = requests.post(
             f"{self.base_url}/auth/login",
             json={
@@ -15,7 +21,115 @@ class APIClient:
             timeout=30,
         )
 
-        response.raise_for_status()
+        if not response.ok:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+
+            if detail:
+                raise RuntimeError(detail)
+
+            response.raise_for_status()
+
+        return response.json()
+    
+    # ========================================================
+    # SIGN UP
+    # ========================================================
+
+    def signup(
+        self,
+        full_name: str,
+        username: str,
+        email: str,
+        password: str,
+    ) -> dict:
+        """Register a new employee account through FastAPI."""
+
+        response = requests.post(
+            f"{self.base_url}/auth/signup",
+            json={
+                "full_name": full_name,
+                "username": username,
+                "email": email,
+                "password": password,
+            },
+            timeout=30,
+        )
+
+        if not response.ok:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+
+            if detail:
+                raise RuntimeError(detail)
+
+            response.raise_for_status()
+
+        return response.json()
+
+    # ========================================================
+    # FORGOT PASSWORD
+    # ========================================================
+
+    def forgot_password(self, email: str) -> dict:
+        """Request a password-reset email."""
+
+        response = requests.post(
+            f"{self.base_url}/auth/forgot-password",
+            json={
+                "email": email,
+            },
+            timeout=30,
+        )
+
+        if not response.ok:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+
+            if detail:
+                raise RuntimeError(detail)
+
+            response.raise_for_status()
+
+        return response.json()
+
+    # ========================================================
+    # RESET PASSWORD
+    # ========================================================
+
+    def reset_password(
+        self,
+        token: str,
+        new_password: str,
+    ) -> dict:
+        """Reset a password using the emailed reset token."""
+
+        response = requests.post(
+            f"{self.base_url}/auth/reset-password",
+            json={
+                "token": token,
+                "new_password": new_password,
+            },
+            timeout=30,
+        )
+
+        if not response.ok:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+
+            if detail:
+                raise RuntimeError(detail)
+
+            response.raise_for_status()
+
         return response.json()
 
     def query(
