@@ -97,3 +97,7 @@ async def rate_limit_middleware(request: Request, call_next):
 # python -m tests.test_reranker
 # python -m tests.test_llm_service
 # python -m tests.test_rag_service
+
+
+# steps to run docker
+# docker start enterprise-rag-redis
