@@ -69,21 +69,19 @@ class AnswerService:
             )
 
         # Prompt injection protection.
-        if not self.prompt_injection_guardrail.validate(
-            context
-        ):
+        if not self.prompt_injection_guardrail.validate(context):
             return (
                 "I could not process the retrieved information "
                 "because it contains potentially unsafe instructions."
             )
 
-        # Generate answer using the LLM.
+        # Generate the initial answer using the LLM.
         answer = self.llm_service.generate_answer(
             query=query,
             context=context,
         )
 
-        # Grounding protection.
+        # Validate the answer against the retrieved evidence.
         grounding_valid = self.grounding_guardrail.validate(
             answer=answer,
             evidence=context,
@@ -92,29 +90,29 @@ class AnswerService:
         if grounding_valid:
             return answer
 
-        # One controlled retry when the first answer
-        # fails grounding validation.
+        # Retry once if the initial answer fails grounding.
         retry_query = f"""
-        Your previous answer failed the grounding check.
+Your previous answer failed the grounding check.
 
-        Answer the user's question again using ONLY facts
-        explicitly supported by the provided evidence.
+Answer the user's question again using ONLY facts
+explicitly supported by the provided evidence.
 
-        Requirements:
-        - Do not use outside knowledge.
-        - Do not invent or infer facts.
-        - Keep the answer concise.
-        - Use wording that is directly supported by the evidence.
+Requirements:
+- Do not use outside knowledge.
+- Do not invent or infer facts.
+- Keep the answer concise.
+- Use wording that is directly supported by the evidence.
 
-        User question:
-        {query}
-        """.strip()
+User question:
+{query}
+""".strip()
 
         retry_answer = self.llm_service.generate_answer(
             query=retry_query,
             context=context,
         )
 
+        # Validate the retry answer.
         retry_valid = self.grounding_guardrail.validate(
             answer=retry_answer,
             evidence=context,
@@ -123,6 +121,7 @@ class AnswerService:
         if retry_valid:
             return retry_answer
 
+        # Return a safe fallback if both answers fail.
         return (
             "I could not provide a reliable answer "
             "based on the available knowledge evidence."

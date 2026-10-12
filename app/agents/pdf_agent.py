@@ -36,9 +36,13 @@ class PDFAgent:
 
             evidence.append({
                 "text": item["text"],
-                "source": metadata["source"],
-                "page": metadata["page"],
-                "chunk_id": metadata["chunk_id"],
+                "source": metadata.get(
+                    "source",
+                    metadata.get("url", "Unknown source"),
+                ),
+                "page": metadata.get("page"),
+                "url": metadata.get("url"),
+                "chunk_id": metadata.get("chunk_id", "unknown"),
                 "rerank_score": item["rerank_score"],
             })
 
@@ -58,6 +62,7 @@ class PDFAgent:
                 {
                     "source": item["source"],
                     "page": item["page"],
+                    "url": item.get("url"),
                     "chunk_id": item["chunk_id"],
                     "rerank_score": item["rerank_score"],
                     "text": item["text"],

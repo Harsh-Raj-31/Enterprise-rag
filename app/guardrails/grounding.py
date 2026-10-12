@@ -15,6 +15,15 @@ class GroundingGuardrail:
         answer: str,
         evidence: list[dict],
     ) -> bool:
+        """
+        Validate the answer against the supplied evidence.
+
+        Checks:
+        1. Answer and evidence are not empty.
+        2. Numeric values are supported by the evidence.
+        3. Individual claims have sufficient evidence overlap.
+        4. The overall answer has sufficient evidence overlap.
+        """
 
         if not answer or not answer.strip():
             return False
@@ -27,8 +36,7 @@ class GroundingGuardrail:
             for item in evidence
         )
 
-        # Remove source/page citation metadata before
-        # validating the factual content of the answer.
+        # Remove citations before validating factual content.
         clean_answer = self._remove_citations(answer)
 
         answer_words = self._normalize(clean_answer)
@@ -37,7 +45,7 @@ class GroundingGuardrail:
         if not answer_words:
             return False
 
-        # Check for contradictory numeric values.
+        # Check for unsupported numeric values.
         if self._has_numeric_contradiction(
             clean_answer,
             evidence_text,
@@ -51,14 +59,10 @@ class GroundingGuardrail:
         ):
             return False
 
-        # Overall answer-level overlap check.
-        overlap = answer_words.intersection(
-            evidence_words
-        )
+        # Check overall answer-level evidence overlap.
+        overlap = answer_words.intersection(evidence_words)
 
-        overlap_ratio = (
-            len(overlap) / len(answer_words)
-        )
+        overlap_ratio = len(overlap) / len(answer_words)
 
         return overlap_ratio >= self.min_overlap
 
@@ -67,63 +71,71 @@ class GroundingGuardrail:
         answer: str,
     ) -> str:
         """
-        Remove source/page citation metadata before
-        validating factual content.
+        Remove citation metadata before validating factual content.
 
-        Examples:
+        Supported examples:
+            [Evidence 1]
+            【Evidence 1】
             (employee_policy.pdf, page 2)
             Source: employee_policy.pdf, page 2.
             See employee_policy.pdf, page 2.
             See employee_policy.pdf, p. 2.
+            Source: employees.csv
         """
 
-        # Remove parenthesized citations.
+        # Remove generated evidence-reference markers.
+        # Supports both ASCII and Unicode brackets.
+        # Remove evidence-reference markers:
+        # [Evidence 1]
+        # 【Evidence 1】
+        # 【1†L1-L4】
+        # 【2†L13-L16】
         answer = re.sub(
-            r"\(\s*[^()]*\.(?:pdf|txt|docx?)"
-            r"\s*,\s*(?:page|p\.)\s*\d+\s*\)",
+            r"(?:"
+            r"[\[【]\s*Evidence\s+\d+\s*[\]】]"
+            r"|"
+            r"【\s*\d+\s*†\s*L\d+(?:\s*-\s*L?\d+)?\s*】"
+            r")",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+)
+        # Remove parenthesized PDF, TXT, DOC, and DOCX citations.
+        # Example: (employee_policy.pdf, page 2)
+        answer = re.sub(
+            r"\(\s*[^()\n]+\.(?:pdf|txt|docx?)"
+            r"\s*,\s*(?:page|p\.?)\s*\d+\s*\)",
             "",
             answer,
             flags=re.IGNORECASE,
         )
 
-        # Remove "Source: filename.pdf, page N".
+        # Remove source citations for document files.
+        # Example: Source: employee_policy.pdf, page 2.
         answer = re.sub(
-            r"\bsource\s*:\s*"
-            r"[^,\n]+?\.(?:pdf|txt|docx?)"
-            r"\s*,\s*(?:page|p\.)\s*\d+"
-            r"\.?",
+            r"\bsource\s*:\s*[^,\n]+?\.(?:pdf|txt|docx?)"
+            r"\s*,\s*(?:page|p\.?)\s*\d+\.?",
             "",
             answer,
             flags=re.IGNORECASE,
         )
 
-        # Remove "See filename.pdf, page N".
+        # Remove references such as:
+        # See employee_policy.pdf, page 2.
+        # See employee_policy.pdf, p. 2.
         answer = re.sub(
-            r"\bsee\s+"
-            r"[^,\n]+?\.(?:pdf|txt|docx?)"
-            r"\s*,\s*(?:page|p\.)\s*\d+"
-            r"\.?",
+            r"\bsee\s+[^,\n]+?\.(?:pdf|txt|docx?)"
+            r"\s*,\s*(?:page|p\.?)\s*\d+\.?",
             "",
             answer,
             flags=re.IGNORECASE,
         )
 
-        # Remove "See filename.pdf, page N".
+        # Remove CSV and Excel source citations.
+        # Examples: Source: employees.csv
+        #           Source: report.xlsx
         answer = re.sub(
-            r"\bsee\s+"
-            r"[^,\n]+?\.(?:pdf|txt|docx?)"
-            r"\s*,\s*(?:page|p\.)\s*\d+"
-            r"\.?",
-            "",
-            answer,
-            flags=re.IGNORECASE,
-        )
-
-        # Remove "Source: filename.csv/xlsx/xls".
-        answer = re.sub(
-            r"\bsource\s*:\s*"
-            r"[^,\n]+?\.(?:csv|xlsx?|xls)"
-            r"\.?",
+            r"\bsource\s*:\s*[^,\n]+?\.(?:csv|xlsx?|xls)\b\.?",
             "",
             answer,
             flags=re.IGNORECASE,
@@ -136,35 +148,37 @@ class GroundingGuardrail:
         answer: str,
         evidence: str,
     ) -> bool:
+        """
+        Return True if the answer contains numeric values
+        that do not appear in the evidence.
+        """
+
+        number_pattern = r"\b\d+(?:\.\d+)?\b"
 
         answer_numbers = set(
-            re.findall(
-                r"\b\d+(?:\.\d+)?\b",
-                answer,
-            )
+            re.findall(number_pattern, answer)
         )
 
         evidence_numbers = set(
-            re.findall(
-                r"\b\d+(?:\.\d+)?\b",
-                evidence,
-            )
+            re.findall(number_pattern, evidence)
         )
 
         if not answer_numbers:
             return False
 
-        return not answer_numbers.issubset(
-            evidence_numbers
-        )
+        return not answer_numbers.issubset(evidence_numbers)
 
     def _has_unsupported_claim(
         self,
         answer: str,
         evidence_text: str,
     ) -> bool:
+        """
+        Check whether individual answer claims have sufficient
+        word overlap with the evidence.
+        """
 
-        # Split into sentences.
+        # Split the answer into sentences.
         sentences = [
             sentence.strip()
             for sentence in re.split(
@@ -174,9 +188,7 @@ class GroundingGuardrail:
             if sentence.strip()
         ]
 
-        evidence_words = self._normalize(
-            evidence_text
-        )
+        evidence_words = self._normalize(evidence_text)
 
         for sentence in sentences:
 
@@ -188,10 +200,7 @@ class GroundingGuardrail:
             )
 
             for claim in claims:
-
-                claim_words = self._normalize(
-                    claim
-                )
+                claim_words = self._normalize(claim)
 
                 if not claim_words:
                     continue
@@ -213,17 +222,16 @@ class GroundingGuardrail:
         self,
         text: str,
     ) -> set[str]:
+        """
+        Normalize text into searchable words and remove
+        common stop words.
+        """
 
-        # Normalize structured text such as:
-        # "name: Ananya Singh | role:AI Engineer"
-        # into individual searchable words.
         words = re.findall(
             r"[a-zA-Z0-9]+(?:['-][a-zA-Z0-9]+)*",
             text.lower(),
         )
 
-        # Ignore common stop words that do not carry
-        # factual meaning for grounding validation.
         stop_words = {
             "the",
             "is",
